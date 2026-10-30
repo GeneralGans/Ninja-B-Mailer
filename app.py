@@ -1,77 +1,76 @@
-import smtplib
-from email.message import EmailMessage
-import pandas as pd
 import streamlit as st
+import pandas as pd
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+from email.mime.base import MIMEBase
+from email import encoders
 import time
 
-# Page Configuration
-st.set_page_config(
-    page_title="Futuristic Bulk Email Sender",
-    page_icon="🚀",
-    layout="wide"
-)
+st.set_page_config(page_title="Economic Ninja Bulk Mailer", page_icon="🚀", layout="centered")
 
-st.title("🚀 Futuristic Bulk Email Sender")
-st.markdown("Send personalized bulk emails with attachments securely using your SMTP provider (App Passwords recommended).")
+st.title("🚀 Economic Ninja Bulk Email Sender")
+st.markdown("Send personalized bulk emails with attachments securely using your SMTP provider.")
 
-# --- Sidebar Configuration: SMTP Settings ---
-st.sidebar.header("1️⃣ SMTP Configuration")
-smtp_host = st.sidebar.text_input("SMTP Host", value="smtp.gmail.com", help="e.g., smtp.gmail.com")
-smtp_port = st.sidebar.number_input("SMTP Port", value=587, help="587 for TLS, 465 for SSL")
-smtp_user = st.sidebar.text_input("SMTP Username / Email", help="Your sender email address")
-smtp_pass = st.sidebar.text_input("SMTP Password", type="password", help="Use an App Password, not your main password")
+# Sidebar Configuration
+st.sidebar.header("🔐 SMTP Configuration")
+smtp_server = st.sidebar.text_input("SMTP Server", value="smtp.gmail.com")
+smtp_port = st.sidebar.number_input("SMTP Port", value=587, step=1)
+smtp_user = st.sidebar.text_input("SMTP Username (Email)", type="default")
+smtp_pass = st.sidebar.text_input("SMTP App Password", type="password")
 
 st.sidebar.markdown("---")
-st.sidebar.markdown("### 🛡️ Security & Tips")
-st.sidebar.info(
-    "• Never use your main account password; generate an **App Password** from your mail provider.\n"
-    "• Credentials are used solely for the active session and are never stored."
+st.sidebar.info("Tip: For Gmail, use an **App Password** generated from your Google Account security settings.")
+
+# 1. Upload Recipient List
+st.subheader("2️⃣ Upload Recipient List")
+uploaded_file = st.file_uploader("Upload Excel (.xlsx) or CSV (.csv) file", type=["csv", "xlsx"])
+
+df = None
+if uploaded_file is not None:
+    try:
+        if uploaded_file.name.endswith('.csv'):
+            df = pd.read_csv(uploaded_file)
+        else:
+            df = pd.read_excel(uploaded_file)
+        st.success(f"Successfully loaded {len(df)} recipients!")
+        st.dataframe(df.head())
+    except Exception as e:
+        st.error(f"Error reading file: {e}")
+
+# 2. Attachments
+st.subheader("4️⃣ Attachments (Optional)")
+uploaded_attachments = st.file_uploader(
+    "Upload files to attach to every email",
+    type=["pdf", "png", "jpg", "jpeg", "docx", "txt", "xlsx"],
+    accept_multiple_files=True
 )
 
-# --- Main Layout ---
-col1, col2 = st.columns(2)
-
-with col1:
-    st.subheader("2️⃣ Upload Recipient List")
-    uploaded_file = st.file_uploader("Upload Excel (.xlsx) or CSV (.csv) file", type=["csv", "xlsx"])
-    
-    df = None
-    if uploaded_file is not None:
-        try:
-            if uploaded_file.name.endswith('.csv'):
-                df = pd.read_csv(uploaded_file)
-            else:
-                df = pd.read_excel(uploaded_file)
-            
-            st.success(f"Successfully loaded {len(df)} rows!")
-            st.dataframe(df.head(3), use_container_width=True)
-        except Exception as e:
-            st.error(f"Error reading file: {e}")
-
-with col2:
-    st.subheader("4️⃣ Attachments (Optional)")
-    uploaded_attachments = st.file_uploader(
-        "Upload files to attach to every email", 
-        type=["pdf", "png", "jpg", "jpeg", "docx", "txt", "xlsx"], 
-        accept_multiple_files=True
-    )
-
+# 3. Compose Email Content
 st.subheader("3️⃣ Compose Email Content")
 sender_name = st.text_input("Sender Name (Optional)", placeholder="e.g., Economic Ninja")
 email_subject = st.text_input("Email Subject", placeholder="Hello {Name}, check out our latest update!")
+
 email_body = st.text_area(
     "Email Body (HTML or Plain Text)",
-    height=200,
+    height=180,
     placeholder="Dear {Name},\n\nYour custom message goes here..."
 )
 
-if df is not None:
-    st.markdown("💡 **Available Placeholders from your file:** " + ", ".join([f"`{{{col}}}`" for col in df.columns]))
+email_signature = st.text_area(
+    "Email Signature (HTML Supported)",
+    height=150,
+    placeholder="Paste your HTML signature block here..."
+)
 
+if df is not None:
+    placeholders_str = ", ".join([f"{{{col}}}" for col in df.columns])
+    st.markdown(f"💡 **Available Placeholders from your file:** {placeholders_str}")
+
+# --- Execution Block ---
 st.subheader("5️⃣ Sending Controls")
 delay = st.slider("⏱️ Delay between emails (seconds)", min_value=0, max_value=10, value=2, help="Helps prevent triggering spam filters")
 
-# --- Execution Block ---
 if st.button("🚀 Send Bulk Emails", type="primary"):
     # Validation checks
     if not smtp_user or not smtp_pass:
@@ -93,58 +92,64 @@ if st.button("🚀 Send Bulk Emails", type="primary"):
         success_count = 0
         fail_count = 0
         total_rows = len(df)
-
+        
         try:
-            # Establish secure SMTP connection
-            status_text.text("Connecting to SMTP server...")
-            server = smtplib.SMTP(smtp_host, smtp_port)
+            server = smtplib.SMTP(smtp_server, smtp_port)
             server.starttls()
             server.login(smtp_user, smtp_pass)
             
             for index, row in df.iterrows():
                 recipient_email = str(row[email_col]).strip()
+                if not recipient_email or recipient_email.lower() == 'nan':
+                    fail_count += 1
+                    continue
                 
-                # Personalize subject and body using row values
-                personalized_subject = email_subject
-                personalized_body = email_body
-                
+                # Format personalized body
+                formatted_body = email_body
                 for col in df.columns:
                     placeholder = f"{{{col}}}"
-                    val = str(row[col])
-                    personalized_subject = personalized_subject.replace(placeholder, val)
-                    personalized_body = personalized_body.replace(placeholder, val)
+                    val = str(row[col]) if pd.notna(row[col]) else ""
+                    formatted_body = formatted_body.replace(placeholder, val)
                 
-                # Construct message
-                msg = EmailMessage()
-                msg['Subject'] = personalized_subject
+                # Combine body and signature block
+                full_message = f"{formatted_body}<br><br>{email_signature}"
+                
+                # Create message
+                msg = MIMEMultipart()
                 msg['From'] = f"{sender_name} <{smtp_user}>" if sender_name else smtp_user
                 msg['To'] = recipient_email
-                msg.set_content(personalized_body)
+                msg['Subject'] = email_subject
                 
-                # Attach files if any uploaded
+                # Attach body as HTML
+                msg.attach(MIMEText(full_message, 'html'))
+                
+                # Attach files if any
                 if uploaded_attachments:
-                    for file in uploaded_attachments:
-                        file.seek(0) # Reset pointer
-                        file_data = file.read()
-                        file_name = file.name
-                        msg.add_attachment(file_data, maintype='application', subtype='octet-stream', filename=file_name)
+                    for att in uploaded_attachments:
+                        part = MIMEBase('application', 'octet-stream')
+                        part.set_payload(att.getvalue())
+                        encoders.encode_base64(part)
+                        part.add_header('Content-Disposition', f'attachment; filename="{att.name}"')
+                        msg.attach(part)
                 
                 try:
-                    server.send_message(msg)
+                    server.sendmail(smtp_user, recipient_email, msg.as_string())
                     success_count += 1
-                    with log_container:
-                        st.success(f"[{index+1}/{total_rows}] Sent successfully to: {recipient_email}")
-                except Exception as mail_err:
+                except Exception as e:
                     fail_count += 1
                     with log_container:
-                        st.error(f"[{index+1}/{total_rows}] Failed to send to {recipient_email}: {mail_err}")
+                        st.error(f"Failed to send to {recipient_email}: {e}")
                 
                 # Update progress
-                progress_bar.progress((index + 1) / total_rows)
-                time.sleep(delay)
+                progress = (index + 1) / total_rows
+                progress_bar.progress(progress)
+                status_text.text(f"Processing {index + 1} of {total_rows}...")
                 
+                if delay > 0:
+                    time.sleep(delay)
+                    
             server.quit()
-            status_text.success(f"✨ Finished! Successfully sent: {success_count} | Failed: {fail_count}")
+            st.success(f"Finished! Successfully sent: {success_count} | Failed: {fail_count}")
             
-        except Exception as conn_err:
-            st.error(f"Failed to connect to SMTP server. Check your credentials and host settings. Error: {conn_err}")
+        except Exception as e:
+            st.error(f"SMTP Connection Error: {e}")
