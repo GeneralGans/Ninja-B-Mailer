@@ -9,7 +9,7 @@ import time
 
 st.set_page_config(page_title="Economic Ninja Bulk Mailer", page_icon="🚀", layout="centered")
 
-st.title("🚀 Economic Ninja Bulk Email Sender")
+st.title("🚀 Ninja Bulk Mailer lite")
 st.markdown("Send personalized bulk emails with attachments securely using your SMTP provider.")
 
 # Sidebar Configuration
